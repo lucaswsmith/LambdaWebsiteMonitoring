@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates a test Code Deploy Instance
+Parameters:
+  Site:
+    Description: Site to monitor
+    Type: String
+    Default: http://camera.lucaswsmith.net.au:12345/zm/
+  ShortName:
+    Description: ShortName for Names
+    Type: String
+    Default: znmdr
+  String:
+    Description: String to monitor page for
+    Type: String
+    Default: <title>ZM - Login</title>
+  LambdaBucket:
+    Description: s3 bucket for Lambda
+    Type: String
+    Default: lucas-smith-lambda-functions
+  LambdaPath:
+    Description: s3 path for Lambda
+    Type: String
+    Default: websiteCheck/lambda_function.zip
+Resources:
+  lambdafunction:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: lambda_function.lambda_handler
+      Role:
+        Fn::GetAtt:
+              - "iamrole"
+              - "Arn"
+      Code: 
+        S3Bucket: !Ref LambdaBucket
+        S3Key: !Ref LambdaPath
+      Runtime: python3.8
+      Timeout: 180
+      MemorySize: 128
+      FunctionName: !Join ["", [!Ref ShortName, "TriggerMonitor"]]
+      Environment:
+        Variables:
+          url: !Ref Site
+          string: !Ref String
+  cwalarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Monitoring for web Site
+      AlarmName: !Join ["", [!Ref ShortName, "TriggerMonitor"]]
+      ComparisonOperator: LessThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Statistic: Minimum
+      Period: 300
+      Threshold: 0
+      TreatMissingData: breaching
+      MetricName: site_monitoring
+      Namespace: site_monitoring
+      Dimensions:
+        - Name: site
+          Value: !Ref Site
+      AlarmActions:
+      - arn:aws:sns:us-west-2:591267592661:lucaswsmithAtGmail
+      OKActions: 
+      - arn:aws:sns:us-west-2:591267592661:lucaswsmithAtGmail
+  iamrole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+  cwevent:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Join ["", [!Ref ShortName, "TriggerMonitor"]]
+      Description: EventRule
+      ScheduleExpression: rate(2 minutes)
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - "lambdafunction"
+              - "Arn"
+          Id: "TargetFunctionV1"
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Join ["", [!Ref ShortName, "TriggerMonitor"]]
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "cwevent"
+          - "Arn"
